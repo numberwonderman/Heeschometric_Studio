@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Heesch Studio: Shape Maker v1.0</title>
+    <title>Heeschometric Studio v1.1</title>
     <style>
         body {
             margin: 0;
@@ -22,102 +22,165 @@
         }
         .controls {
             margin-top: 15px;
+            display: flex;
+            gap: 10px;
         }
         button {
             padding: 10px 20px;
             font-size: 16px;
-            background: #2b6cb0;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
         }
-        button:hover { background: #3182ce; }
+        #clearBtn { background: #e53e3e; }
+        #clearBtn:hover { background: #c53030; }
+        #testBtn { background: #2b6cb0; }
+        #testBtn:hover { background: #2b6cb0; }
     </style>
 </head>
 <body>
 
-    <h1>Heeschometric Shape Maker</h1>
-    <p>Click to add vertices. Click the first point again (or press Clear) to reset.</p>
+    <h1>Heeschometric Studio</h1>
+    <p>Click to add vertices. Close the shape by clicking the red starting point, then hit "Generate Cluster".</p>
     
     <canvas id="studioCanvas" width="600" height="600"></canvas>
     
     <div class="controls">
-        <button id="clearBtn">Clear Shape</button>
+        <button id="testBtn">Generate Cluster</button>
+        <button id="clearBtn">Clear Studio</button>
     </div>
 
 <script>
 const canvas = document.getElementById('studioCanvas');
 const ctx = canvas.getContext('2d');
 const clearBtn = document.getElementById('clearBtn');
+const testBtn = document.getElementById('testBtn');
 
-// THIS IS YOUR FOUNDATION: A clean array of (x, y) vertices
 let vertices = [];
-const SNAP_DIST = 15; // Pixels away from origin to trigger a closed polygon
+let transformedClones = []; // Stores generated layers/clones for rendering
+let isShapeClosed = false;
+const SNAP_DIST = 15;
 
-// Event listener for user mouse clicks
+// --- THE MATRICES & TRANSFORMATION ENGINE ---
+// Pure geometric function applying affine transformations to your vertex array
+function cloneShape(shapeVertices, tx, ty, angleDegrees, reflectX = false) {
+    const angleRad = (angleDegrees * Math.PI) / 180;
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+
+    return shapeVertices.map(v => {
+        // 1. Apply reflection if flagged
+        let x1 = reflectX ? -v.x : v.x;
+        let y1 = v.y;
+
+        // 2. Rotate around the local origin
+        let x2 = x1 * cos - y1 * sin;
+        let y2 = x1 * sin + y1 * cos;
+
+        // 3. Translate to target coordinate destination
+        return {
+            x: x2 + tx,
+            y: y2 + ty
+        };
+    });
+}
+
 canvas.addEventListener('click', (e) => {
-    // Get mouse coordinates relative to the canvas bounding box
+    if (isShapeClosed) return; // Prevent adding points if shape is locked
+
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Check if the user is clicking close to the starting vertex to close/reset the loop
     if (vertices.length > 2) {
-        const startX = vertices[0].x;
-        const startY = vertices[0].y;
-        const dist = Math.hypot(mouseX - startX, mouseY - startY);
-        
+        const dist = Math.hypot(mouseX - vertices[0].x, mouseY - vertices[0].y);
         if (dist < SNAP_DIST) {
-            console.log("Shape Complete! Exporting Vertex Array: ", JSON.stringify(vertices));
-            alert("Shape Data Captured! Ready for the Grid lattice.");
-            vertices = []; // Clear to start a new shape
+            isShapeClosed = true;
             draw();
             return;
         }
     }
 
-    // Push new clean coordinate tracking object into our data structure
     vertices.push({ x: mouseX, y: mouseY });
     draw();
 });
 
-// Clear button handler
-clearBtn.addEventListener('click', () => {
-    vertices = [];
+// Button triggers the search/transformation matrix sandbox
+testBtn.addEventListener('click', () => {
+    if (vertices.length < 3 || !isShapeClosed) {
+        alert("Please draw and close a valid polygon shape first!");
+        return;
+    }
+
+    // Capture the geometric center of your drawn shape to rotate smoothly around it
+    const centerX = vertices.reduce((sum, v) => sum + v.x, 0) / vertices.length;
+    const centerY = vertices.reduce((sum, v) => sum + v.y, 0) / vertices.length;
+
+    // Shift original shape vertices to center origin momentarily for accurate rotation
+    const localizedVertices = vertices.map(v => ({ x: v.x - centerX, y: v.y - centerY }));
+
+    transformedClones = [
+        // Clone 1: Shifted right, rotated 60 degrees
+        cloneShape(localizedVertices, centerX + 120, centerY, 60, false),
+        // Clone 2: Shifted left, rotated 120 degrees
+        cloneShape(localizedVertices, centerX - 120, centerY, 120, false),
+        // Clone 3: Shifted down-right, reflected across X axis
+        cloneShape(localizedVertices, centerX + 60, centerY + 100, 180, true),
+        // Clone 4: Shifted up-left, rotated 240 degrees
+        cloneShape(localizedVertices, centerX - 60, centerY - 100, 240, false)
+    ];
+
     draw();
 });
 
-// Pure rendering routine
+clearBtn.addEventListener('click', () => {
+    vertices = [];
+    transformedClones = [];
+    isShapeClosed = false;
+    draw();
+});
+
+// Render Loop
 function draw() {
-    // Clear the slate
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw background guide lines (Grid layout placeholder)
-    ctx.strokeStyle = '#222';
+    // Draw background guide grid lines
+    ctx.strokeStyle = '#25252d';
     ctx.lineWidth = 1;
     for(let i = 0; i < canvas.width; i += 40) {
         ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
     }
 
+    // Render Cloned Transformation Layer
+    transformedClones.forEach((clone, idx) => {
+        ctx.strokeStyle = `hsl(${(idx * 75) % 360}, 70%, 60%)`; // Distinct color profiles
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(clone[0].x, clone[0].y);
+        for(let i = 1; i < clone.length; i++) ctx.lineTo(clone[i].x, clone[i].y);
+        ctx.closePath();
+        ctx.stroke();
+    });
+
     if (vertices.length === 0) return;
 
-    // 1. Draw lines connecting active points
-    ctx.strokeStyle = '#4299e1';
-    ctx.lineWidth = 3;
+    // Render Master Proto-Tile
+    ctx.strokeStyle = isShapeClosed ? '#48bb78' : '#4299e1'; // Green if closed, blue if drawing
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(vertices[0].x, vertices[0].y);
-    for (let i = 1; i < vertices.length; i++) {
-        ctx.lineTo(vertices[i].x, vertices[i].y);
-    }
+    for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
+    
+    if (isShapeClosed) ctx.closePath();
     ctx.stroke();
 
-    // 2. Draw the tracking node points
+    // Draw active vertices tracking nodes
     vertices.forEach((vertex, index) => {
-        ctx.fillStyle = index === 0 ? '#f56565' : '#48bb78'; // Red for origin point, Green for others
+        ctx.fillStyle = index === 0 ? '#f56565' : '#48bb78';
         ctx.beginPath();
-        ctx.arc(vertex.x, vertex.y, 6, 0, 2 * Math.PI);
+        ctx.arc(vertex.x, vertex.y, index === 0 ? 7 : 5, 0, 2 * Math.PI);
         ctx.fill();
     });
 }
