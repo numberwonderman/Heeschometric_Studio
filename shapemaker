@@ -51,27 +51,29 @@
         <button id="clearBtn">Clear Canvas</button>
     </div>
 
-<script>
 const canvas = document.getElementById('studioCanvas');
 const ctx = canvas.getContext('2d');
 const clearBtn = document.getElementById('clearBtn');
 const generateBtn = document.getElementById('generateBtn');
 
-let masterEdge = []; // The single base curve drawn by the user
-let completeTile = []; // Stores the 4 constrained sides combined
+let masterEdge = []; 
+let completeTile = []; // The central "Layer 0" tile
+let neighbors = [];     // Array of arrays storing "Layer 1" neighbors
 let isConstrained = false;
 
+// Midpoints tracking array to guide neighborhood placement
+let midpoints = [];
+
 // --- HEESCH CENTER-ROTATION MATRIX UTILITY ---
-// Rotates a line segment 180 degrees around a specific midpoint
 function rotate180Around(points, midX, midY) {
     return points.map(p => ({
         x: 2 * midX - p.x,
         y: 2 * midY - p.y
-    })).reverse(); // Reverse array order to keep polygon vertex winding contiguous
+    })).reverse();
 }
 
 canvas.addEventListener('click', (e) => {
-    if (isConstrained) return; // Lock drawing once constraints are computed
+    if (isConstrained) return;
 
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -82,54 +84,63 @@ canvas.addEventListener('click', (e) => {
 });
 
 generateBtn.addEventListener('click', () => {
-    if (masterEdge.length < 2) {
-        alert("Click at least two points to define your base edge!");
-        return;
+    if (!isConstrained) {
+        if (masterEdge.length < 2) {
+            alert("Click at least two points to define your base edge!");
+            return;
+        }
+
+        const p0 = masterEdge[0];                       
+        const p1 = masterEdge[masterEdge.length - 1];    
+        
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        
+        const p2 = { x: p1.x - dy, y: p1.y + dx };       
+        const p3 = { x: p0.x - dy, y: p0.y + dx };       
+
+        const side1 = [...masterEdge];
+
+        const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        const side2 = rotate180Around(side1, mid2.x, mid2.y);
+
+        const mid3 = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
+        const side3 = rotate180Around(side1, mid3.x, mid3.y);
+
+        const mid4 = { x: (p3.x + p0.x) / 2, y: (p3.y + p0.y) / 2 };
+        const side4 = rotate180Around(side1, mid4.x, mid4.y);
+
+        // Store the midpoints of our 4 sides for neighborhood deployment
+        const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        midpoints = [mid1, mid2, mid3, mid4];
+
+        completeTile = [...side1, ...side2, ...side3, ...side4];
+        isConstrained = true;
+        generateBtn.innerText = "Test Layer 1 Neighborhood";
+    } else {
+        // --- THE NEIGHBORHOOD SEARCH LOOP (LAYER 1) ---
+        // Systematically rotate the entire master tile around each of its 4 midpoints
+        neighbors = midpoints.map(mid => rotate180Around(completeTile, mid.x, mid.y));
+        generateBtn.disabled = true; // Complete the step
     }
-
-    // Define fixed target vertices for our structural Quad lattice corner layout
-    const p0 = masterEdge[0];                       // Bottom Left corner
-    const p1 = masterEdge[masterEdge.length - 1];    // Bottom Right corner
-    
-    // Scale vectors to construct an orthogonal grid framework for the remaining 2 corners
-    const dx = p1.x - p0.x;
-    const dy = p1.y - p0.y;
-    
-    const p2 = { x: p1.x - dy, y: p1.y + dx };       // Top Right corner
-    const p3 = { x: p0.x - dy, y: p0.y + dx };       // Top Left corner
-
-    // --- CONSTRUCT SIDE 1 (User Drawn Curve) ---
-    const side1 = [...masterEdge];
-
-    // --- CONSTRUCT SIDE 2 (Rotated copy of side 1 shifted to Edge 2) ---
-    const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-    const side2 = rotate180Around(side1, mid2.x, mid2.y);
-
-    // --- CONSTRUCT SIDE 3 (Rotated copy of side 1 shifted to Edge 3) ---
-    const mid3 = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
-    const side3 = rotate180Around(side1, mid3.x, mid3.y);
-
-    // --- CONSTRUCT SIDE 4 (Rotated copy of side 1 shifted to Edge 4) ---
-    const mid4 = { x: (p3.x + p0.x) / 2, y: (p3.y + p0.y) / 2 };
-    const side4 = rotate180Around(side1, mid4.x, mid4.y);
-
-    // Combine all 4 points matrices cleanly into a closed system loop
-    completeTile = [...side1, ...side2, ...side3, ...side4];
-    isConstrained = true;
     draw();
 });
 
 clearBtn.addEventListener('click', () => {
     masterEdge = [];
     completeTile = [];
+    neighbors = [];
+    midpoints = [];
     isConstrained = false;
+    generateBtn.disabled = false;
+    generateBtn.innerText = "Enforce CCCC Constraints";
     draw();
 });
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Grid Background Layout lines
+    // Background Grid
     ctx.strokeStyle = '#25252d';
     ctx.lineWidth = 1;
     for(let i = 0; i < canvas.width; i += 40) {
@@ -137,25 +148,44 @@ function draw() {
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
     }
 
-    // Render Full Enforced Heesch CCCC Tile
-    if (isConstrained && completeTile.length > 0) {
-        ctx.strokeStyle = '#38a169'; // Green indicating passing structural constraint validation
+    // Render Generated Layer 1 Neighbors
+    neighbors.forEach((neighbor) => {
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.8)'; // Purple for Layer 1
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(neighbor[0].x, neighbor[0].y);
+        for(let i = 1; i < neighbor.length; i++) ctx.lineTo(neighbor[i].x, neighbor[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.05)';
+        ctx.fill();
+    });
+
+    if (completeTile.length > 0) {
+        // Render Central Layer 0 Tile
+        ctx.strokeStyle = '#38a169'; 
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.moveTo(completeTile[0].x, completeTile[0].y);
         for(let i = 1; i < completeTile.length; i++) ctx.lineTo(completeTile[i].x, completeTile[i].y);
         ctx.closePath();
         ctx.stroke();
-        
-        // Fill inside lightly to show it as a solid proto-tile
         ctx.fillStyle = 'rgba(56, 161, 105, 0.15)';
         ctx.fill();
-        return; 
+
+        // Render Midpoint Nodes to show where the search is pivoting
+        midpoints.forEach(mid => {
+            ctx.fillStyle = '#ff007f';
+            ctx.beginPath();
+            ctx.arc(mid.x, mid.y, 4, 0, 2 * Math.PI);
+            ctx.fill();
+        });
+        return;
     }
 
-    // Render active Master Reference Line while user is drawing
+    // Render active drawing line
     if (masterEdge.length > 0) {
-        ctx.strokeStyle = '#4299e1'; // Blue tracking color
+        ctx.strokeStyle = '#4299e1';
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(masterEdge[0].x, masterEdge[0].y);
